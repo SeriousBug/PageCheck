@@ -187,8 +187,3 @@ if __name__ == "__main__":
     result = checker.check_update_file()
     if args.exitmessage:
         print("{} changes found.".format(result))
-
-    """
-    mail_notify = SMTPNotify("smtp.gmail.com:587", "SeriousBug@Gmail.com", "syqg uxcf ewez qhno", "Updated websites")
-    check_update_file("checklist.json", mail_notify)
-    """

@@ -21,12 +21,13 @@ import json
 
 _DEFAULT_FILE = "checklist.json"
 _DEFAULT_HASHER = hashlib.sha512
+_DEFAULT_NOTIFIER = lambda x: None
 
 
 class PageCheck:
-    def __init__(self, json_file, notifier, verbose=False, hasher=_DEFAULT_HASHER):
+    def __init__(self, page_dict, notifier=_DEFAULT_NOTIFIER, verbose=False, hasher=_DEFAULT_HASHER):
         self.notifier = notifier
-        self.json_file = json_file
+        self.page_dict = page_dict
         self.hasher = hasher
         if verbose:
             self.print = print
@@ -34,9 +35,7 @@ class PageCheck:
             self.print = lambda x: None
 
     def get_hash(self, url):
-        """
-        Returns the hash of the page at url.
-        """
+        """Returns the hash of the page at url."""
         self.print("Downloading page {}".format(url))
         page = requests.get(url)
         page_text = page.text.encode("utf-8")
@@ -44,9 +43,7 @@ class PageCheck:
         return self.hasher(page_text).hexdigest()
 
     def get_hash_dict(self, url_list):
-        """
-        Returns a dictionary with url_list as keys, and the hashes of the pages as values.
-        """
+        """Returns a dictionary with url_list as keys, and the hashes of the pages as values."""
         hash_dict = {}
         self.print("Starting to hash {} pages.".format(len(url_list)))
         for url in url_list:
@@ -54,11 +51,12 @@ class PageCheck:
         self.print("Hashing finished.")
         return hash_dict
 
-    def compare_dicts(self, first_dict, second_dict):
-        """
-        Compares values of two dictionaries.
+    def diff_dict(self, first_dict, second_dict):
+        """Compares values of two dictionaries.
+
         Returns a new dictionary, containing the differences.
-        Values of the returned pairs will be from first_dict if the keys are present in both dictionaries.
+        Values of the returned pairs will be from first_dict if the keys are present in both dictionaries,
+        so first_dict should be the new one if diff_dict is being called to update the old dictionary.
         """
         diff = {}
         all_keys = set(list(first_dict.keys()) + list(second_dict.keys()))
@@ -76,26 +74,69 @@ class PageCheck:
         self.print("{} differences found.".format(len(diff)))
         return diff
 
-    def check_update_file(self):
+    def check_update_notify(self, run_silent=False):
+        """Check the self.page_dict to find if any pages have changed.
+
+        If there are any changes in any of the pages, the dictionary will be updated and
+        self.notifier will be called with the changes.
+        Finally, a dictionary containing the changed pages will be returned.
+
+        Args:
+            run_silent: If this is set to True, the notifier will not be called if some pages have changed.
+                self.page_dict will still be updated.
+
+        Returns:
+            A dictionary containing the changed pages, and their new hashes. For example:
+
+            {
+            "http://example.com": "ddf40d...701ff",
+            "http://another.com/some_page.html": "adf21...2ka4as"
+            }
         """
-        Read the given file. The file should be a JSON file, containing a dictionary,
-        with urls as keys, and hashes of the pages as values.
-        If there are any changes in any page,
-        update the file and call the notification_method with differences.
-        Returns the number of changed pages.
-        """
-        with open(self.json_file, mode="r") as opened_file:
-            self.print("Reading file {}".format(self.json_file))
-            old_dict = json.load(opened_file)
-        new_dict = self.get_hash_dict(old_dict.keys())
-        diff = self.compare_dicts(new_dict, old_dict)
-        if diff != {}:
+        new_dict = self.get_hash_dict(self.page_dict.keys())
+        diff = self.diff_dict(new_dict, self.page_dict)
+        if diff != {} and not run_silent:
             self.print("Sending notifications.")
             self.notifier(diff)
-            with open(self.json_file, mode="w") as opened_file:
-                self.print("Saving changes to the file.")
-                json.dump(new_dict, opened_file, indent=2)
-        return len(diff)
+        self.page_dict = new_dict
+        return diff
+
+    def load_json(self, path_to_file):
+        """Load self.page_dict from a json file.
+
+        The file should contain a dictionary, with keys as URLs to the pages,
+        and values as hashes of these pages or empty strings. For example:
+        {
+            "http://example.com": "ddf40d...701ff",
+            "http://another.com/some_page.html": ""
+        }
+        Please note that the file is not checked to see if it fits to this format,
+        and it is possible to load a JSON file that will cause errors during the page requests.
+
+        Args:
+            path_to_file: A string containing the file path. The file will be opened read-only.
+
+        Raises:
+            OSError: The file at path_to_file does not exist or otherwise is inaccessible.
+            ValueError: The file at path_to_file is not a valid JSON file.
+        """
+        with open(path_to_file, mode="r") as file:
+            self.page_dict = json.load(file)
+        return True
+
+    def save_json(self, path_to_file):
+        """Save self.page_dict into a json file.
+
+        Args:
+            path_to_file: A string containing the file path. The file will be truncated before writing.
+
+        Raises:
+            OSError: The file at path_to_file does not exist and can't be created, or
+                the file is inaccessible.
+        """
+        with open(path_to_file, mode="w") as file:
+            json.dump(self.page_dict, file, indent=2)
+        return True
 
 
 class SMTPNotify:
@@ -183,7 +224,10 @@ if __name__ == "__main__":
     else:
         mail_notifier = lambda x: None
 
-    checker = PageCheck(args.file, mail_notifier, args.verbose)
-    result = checker.check_update_file()
+    checker = PageCheck({}, mail_notifier, args.verbose)
+    checker.load_json(args.file)
+    result = checker.check_update_notify()
+    if len(result) > 0:
+        checker.save_json(args.file)
     if args.exitmessage:
         print("{} changes found.".format(result))

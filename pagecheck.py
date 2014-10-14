@@ -15,7 +15,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-import requests
+import urllib.request
 import hashlib
 import json
 
@@ -37,8 +37,8 @@ class PageCheck:
     def get_hash(self, url):
         """Returns the hash of the page at url."""
         self.print("Downloading page {}".format(url))
-        page = requests.get(url)
-        page_text = page.text.encode("utf-8")
+        page = urllib.request.urlopen(url)
+        page_text = page.read()
         self.print("Hashing page {}".format(url))
         return self.hasher(page_text).hexdigest()
 
@@ -170,7 +170,7 @@ class SMTPNotify:
         self.print("Mail sent.")
 
 
-if __name__ == "__main__":
+def _main():
     import argparse
     parser = argparse.ArgumentParser(description="Check websites for changes.")
     parser.add_argument("-v", "--verbose", action="store_true", default=False,
@@ -231,3 +231,7 @@ if __name__ == "__main__":
         checker.save_json(args.file)
     if args.exitmessage:
         print("{} changes found.".format(result))
+
+
+if __name__ == "__main__":
+    _main()

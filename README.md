@@ -70,7 +70,7 @@ You can easily use PageCheck in your own scripts as well. You just need to impor
     >>> p = PageCheck(pages)
     >>> p.check_update_file()
     {'https://www.python.org': 'c647d3da8d920168cb9dc6479e5567dcb7578844849c3cbe94a9c76e767c127a',
- 'http://example.com': '3587cb776ce0e4e8237f215800b7dffba0f25865cb84550e87ea8bbac838c423'}
+    'http://example.com': '3587cb776ce0e4e8237f215800b7dffba0f25865cb84550e87ea8bbac838c423'}
 
 You can also use SMTPNotify to send mail notifications as well.
 
@@ -80,7 +80,7 @@ You can also use SMTPNotify to send mail notifications as well.
     >>> p = PageCheck(pages, notifier=n)
     >>> p.check_update_file()
     {'https://www.python.org': 'c647d3da8d920168cb9dc6479e5567dcb7578844849c3cbe94a9c76e767c127a',
- 'http://example.com': '3587cb776ce0e4e8237f215800b7dffba0f25865cb84550e87ea8bbac838c423'}
+    'http://example.com': '3587cb776ce0e4e8237f215800b7dffba0f25865cb84550e87ea8bbac838c423'}
 
 In fact, you can use a custom notifier. You only need a callable that accepts a dictionary. If you just want to pick another hashing algorithm from hashlib, you can use the GetHash class.
 

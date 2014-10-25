@@ -18,45 +18,107 @@
 import urllib.request
 import hashlib
 import json
+import multiprocessing
 
 _DEFAULT_FILE = "checklist.json"
-_DEFAULT_HASHER = hashlib.sha512
+_DEFAULT_HASHLIB_ALGORITHM = hashlib.sha256
 _DEFAULT_NOTIFIER = lambda x: None
+_DEFAULT_PROCESS_COUNT = 4
+
+
+class GetHash:
+    """A class that downloads and hashes pages when called."""
+    def __init__(self, hashlib_algorithm=_DEFAULT_HASHLIB_ALGORITHM):
+        """
+        Args:
+            hashlib_algorithm: The algorithm from hashlib to use.
+                The default is hashlib.sha512, as denoted by _DEFAULT_HASHLIB_ALGORITHM.
+        """
+        self.algorithm = hashlib_algorithm
+
+    def __call__(self, url):
+        """Returns a tuple of the url and the hash of the page.
+
+        Args:
+            url: A URL to a page. It should start with 'http://' or 'https://'.
+                HTTPS connections will be made, but no verification is done on the certificate.
+
+        Returns:
+            A tuple of the url, and hash of the page.
+            For example:
+            (http://example.com", "09b9c392dc1f6e914cea287cb6be34b0")
+         """
+        page = urllib.request.urlopen(url)
+        page_text = page.read()
+        return url, self.algorithm(page_text).hexdigest()
 
 
 class PageCheck:
-    def __init__(self, page_dict, notifier=_DEFAULT_NOTIFIER, verbose=False, hasher=_DEFAULT_HASHER):
+    """A class to manage the dictionary mapping the URLs to hashes."""
+    def __init__(self, page_dict, notifier=_DEFAULT_NOTIFIER,
+                 verbose=False, hasher=GetHash(),
+                 process_count=_DEFAULT_PROCESS_COUNT):
+        """
+        Args:
+            page_dict: A dictionary with keys as URLs, and the values as hashes of the
+                pages referenced by the URLs. For example:
+                {"http://example.com": "09b9c392dc1f6e914cea287cb6be34b0",
+                 "https://www.python.org/": "b2cc0b046167c335127408b5fe2b5d9b"}
+            notifier: A callable that accepts a dictionary like the dictionary given to page_dict.
+                When check_update_notify method is called, notifier will be given
+                such a dictionary, containing the pages that have change since the last run
+                with their new hashes.
+            verbose: A True or False value. If True, then PageCheck will print messages for many actions it takes.
+            hasher: A callable that returns the hash of the page when given an URL. By default, this is
+                GetHash created with its default values.
+            process_count: Number of processes that should be created when downloading and hashing pages.
+                If set to a value lower than 2, multiprocessing will not be used at all.
+        """
         self.notifier = notifier
         self.page_dict = page_dict
         self.hasher = hasher
+        self.process_count = process_count
         if verbose:
             self.print = print
         else:
             self.print = lambda x: None
 
-    def get_hash(self, url):
-        """Returns the hash of the page at url."""
-        self.print("Downloading page {}".format(url))
-        page = urllib.request.urlopen(url)
-        page_text = page.read()
-        self.print("Hashing page {}".format(url))
-        return self.hasher(page_text).hexdigest()
-
     def get_hash_dict(self, url_list):
         """Returns a dictionary with url_list as keys, and the hashes of the pages as values."""
-        hash_dict = {}
-        self.print("Starting to hash {} pages.".format(len(url_list)))
-        for url in url_list:
-            hash_dict[url] = self.get_hash(url)
+        self.print("Starting to download and hash {} pages.".format(len(url_list)))
+        if self.process_count > 2:  # Use multiprocessing
+            with multiprocessing.Pool(processes=self.process_count) as hash_pool:
+                self.print("Spawning {} processes.".format(self.process_count))
+                hash_dict = dict(hash_pool.map(self.hasher, url_list))
+        else:  # Do not use multiprocessing
+            hash_dict = {}
+            for url in url_list:
+                returnedurl, hash_dict[url] = self.hasher(url)
         self.print("Hashing finished.")
         return hash_dict
 
     def diff_dict(self, first_dict, second_dict):
         """Compares values of two dictionaries.
 
-        Returns a new dictionary, containing the differences.
-        Values of the returned pairs will be from first_dict if the keys are present in both dictionaries,
-        so first_dict should be the new one if diff_dict is being called to update the old dictionary.
+        Values for matching keys are compared to find differences. The keys that exist in one dictionary,
+        but not the other are also treated as differences.
+
+        Args:
+            first_dict: The first dictionary to compare. If keys with different values are found,
+                the returned dictionary will take its value from this dictionary.
+            second_dict: The second dictionary to compare.
+
+        Returns:
+            A dictionary contaning the pages that have changed, with keys as URLs and values as hashes.
+            For example, comparing:
+
+            first_dict = {"https://www.python.org/": "b2cc0b046167c335127408b5fe2b5d9b"}
+            second_dict = {"https://www.python.org/": "53e99a6a74d9f1005df462285329a6f6",
+                           "http://example.com": "09b9c392dc1f6e914cea287cb6be34b0"}
+
+            will result in:
+                {"https://www.python.org/": "b2cc0b046167c335127408b5fe2b5d9b",
+                 "http://example.com": "09b9c392dc1f6e914cea287cb6be34b0"}
         """
         diff = {}
         all_keys = set(list(first_dict.keys()) + list(second_dict.keys()))
@@ -96,7 +158,6 @@ class PageCheck:
         new_dict = self.get_hash_dict(self.page_dict.keys())
         diff = self.diff_dict(new_dict, self.page_dict)
         if diff != {} and not run_silent:
-            self.print("Sending notifications.")
             self.notifier(diff)
         self.page_dict = new_dict
         return diff
@@ -140,11 +201,24 @@ class PageCheck:
 
 
 class SMTPNotify:
-    def __init__(self, server, user, password, target, subject, verbose=False):
+    """A class that sends a mail over SMTP."""
+    def __init__(self, server, user, password, target, subject, use_tls=True, verbose=False):
+        """
+        Args:
+            server: The server to connect to send the mail.
+                For example: "smtp.example.com:587"
+            user: The username to use when authenticating. Use an empty string to skip authentication.
+            password: The password to use when authenticating. Use an empty string to skip authentication.
+            target: Recipients of the mail, the "To" address. Accepts a single string, or a list of strings.
+            subject: The subject line of the mail.
+            use_tls: If set to False, then TLS will not be used.
+            verbose: If True, then SMTPNotify will print messages about the actions it takes as it runs.
+        """
         self.server = server
         self.user = user
         self.password = password
         self.target = target
+        self.use_tls = use_tls
         self.subject = subject
         if verbose:
             self.print = print
@@ -152,6 +226,16 @@ class SMTPNotify:
             self.print = lambda x: None
 
     def __call__(self, msg_dict):
+        """Send the mail.
+
+        Args:
+            msg_dict: A dictionary. Keys of this dictionary will be sent as the message.
+
+        Returns:
+            A dictionary, containing one entry for each recipient that was refused.
+            If the dictionary is empty, all recipients have received the mail.
+            See smtplib.SMTP.sendmail for details.
+        """
         import smtplib
         from email.mime.text import MIMEText
         self.print("Preparing message.")
@@ -161,16 +245,21 @@ class SMTPNotify:
         message["To"] = self.target
         self.print("Connecting to mail server.")
         mail_server = smtplib.SMTP(self.server)
-        mail_server.starttls()
-        self.print("Logging into mail server.")
-        mail_server.login(self.user, self.password)
+        if self.use_tls:
+            self.print("Enabling TLS.")
+            mail_server.starttls()
+        if not all((self.user == "", self.password == "")):
+            self.print("Logging into mail server.")
+            mail_server.login(self.user, self.password)
         self.print("Sending the mail.")
-        mail_server.send_message(message)
+        refused = mail_server.send_message(message)
         mail_server.quit()
         self.print("Mail sent.")
+        return refused
 
 
 def _main():
+    """The function that will be called when the script is run, rather than imported."""
     import argparse
     parser = argparse.ArgumentParser(description="Check websites for changes.")
     parser.add_argument("-v", "--verbose", action="store_true", default=False,
@@ -190,9 +279,14 @@ def _main():
     parser.add_argument("-p", "--passw", type=str, default="",
                         help="Password to use while connecting to SMTP.")
     parser.add_argument("-t", "--target", type=str, default="",
-                        help="Mail address to send the notification to.")
+                        help="Mail address to send the notification to. Either a single mail address, or a list of"
+                             "addresses separated with ; .")
     parser.add_argument("-s", "--subject", type=str, default="Updated Websites",
                         help="Subject string to use while sending mail notifications.")
+    parser.add_argument("-c", "--processcount", type=int, default=_DEFAULT_PROCESS_COUNT,
+                        help="Number of processes to use while downloading and hashing.")
+    parser.add_argument("-g", "--hashingalgorithm", type=str, default="sha256",
+                        help="Hashing algorithms to use. Possible values are md5, sha256, sha512.")
     args = parser.parse_args()
     if args.verbose:
         vprint = print
@@ -220,17 +314,27 @@ def _main():
     if args.mail != "":
         if args.target == "":
             args.target = args.user
+        else:
+            args.target = args.target.strip(";")
         mail_notifier = SMTPNotify(args.mail, args.user, args.passw, args.target, args.subject, args.verbose)
     else:
         mail_notifier = lambda x: None
 
-    checker = PageCheck({}, mail_notifier, args.verbose)
+    hashalg = _DEFAULT_HASHLIB_ALGORITHM
+    if args.hashingalgorithm == "md5":
+        hashalg = hashlib.md5
+    elif args.hashingalgorithm == "sha256":
+        hashalg = hashlib.sha256
+    elif args.hashingalgorithm == "sha512":
+        hashalg = hashlib.sha512
+
+    checker = PageCheck({}, mail_notifier, args.verbose, hasher=GetHash(hashalg), process_count=args.processcount)
     checker.load_json(args.file)
     result = checker.check_update_notify()
     if len(result) > 0:
         checker.save_json(args.file)
     if args.exitmessage:
-        print("{} changes found.".format(result))
+        print("{} changes found.".format(len(result)))
 
 
 if __name__ == "__main__":

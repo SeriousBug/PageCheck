@@ -19,6 +19,7 @@ To run the actual check, all you have to do is run the script(without -a or -r o
     1 changes found.
 
 PageCheck also makes use of multiprocessing. By default, it will use 4 processes to download and hash pages. You can set the number of processes to use with -c option. Setting it to 1 or less will disable multiprocessing.
+
     # pagecheck -e -c 17
     12 changes found.
 

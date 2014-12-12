@@ -317,7 +317,7 @@ def _main():
             args.target = args.user
         else:
             args.target = args.target.strip(";")
-        mail_notifier = SMTPNotify(args.mail, args.user, args.passw, args.target, args.subject, args.verbose)
+        mail_notifier = SMTPNotify(args.mail, args.user, args.passw, args.target, args.subject, verbose=args.verbose)
     else:
         mail_notifier = lambda x: None
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
     PageCheck, checks web pages for changes and sends notifications.
     Copyright (C) 2014  Kaan Genç
@@ -86,7 +87,7 @@ class PageCheck:
     def get_hash_dict(self, url_list):
         """Returns a dictionary with url_list as keys, and the hashes of the pages as values."""
         self.print("Starting to download and hash {} pages.".format(len(url_list)))
-        if self.process_count > 2:  # Use multiprocessing
+        if self.process_count > 1:  # Use multiprocessing
             with multiprocessing.Pool(processes=self.process_count) as hash_pool:
                 self.print("Spawning {} processes.".format(self.process_count))
                 hash_dict = dict(hash_pool.map(self.hasher, url_list))
